@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/googlecloudplatform/gcsfuse/v3/cfg"
+	"github.com/googlecloudplatform/gcsfuse/v3/internal/cache/file"
 	"github.com/googlecloudplatform/gcsfuse/v3/internal/logger"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
@@ -586,6 +587,9 @@ func TestArgsParsing_FileCacheFlags(t *testing.T) {
 					MaxSizeMb:                              100,
 					ParallelDownloadsPerFile:               2,
 					SharedCacheChunkSizeMb:                 8,
+					SizeScanEnable:                         false,
+					SizeScanFiles:                          false,
+					SizeScanFrequencySeconds:               file.DefaultFileCacheSizeScanFrequencySeconds,
 					WriteBufferSize:                        4 * 1024 * 1024,
 					EnableODirect:                          false,
 				},
@@ -607,6 +611,9 @@ func TestArgsParsing_FileCacheFlags(t *testing.T) {
 					MaxSizeMb:                              -1,
 					ParallelDownloadsPerFile:               16,
 					SharedCacheChunkSizeMb:                 8,
+					SizeScanEnable:                         false,
+					SizeScanFiles:                          false,
+					SizeScanFrequencySeconds:               file.DefaultFileCacheSizeScanFrequencySeconds,
 					WriteBufferSize:                        4 * 1024 * 1024,
 					EnableODirect:                          false,
 				},
@@ -2755,6 +2762,131 @@ func TestArgParsing_CliFlagsOverridesFlagOptimizations(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, capturedMountInfo)
 			tc.validate(t, capturedMountInfo)
+		})
+	}
+}
+
+func TestArgsParsing_FileCacheSizeScanFlags(t *testing.T) {
+	tests := []struct {
+		name                 string
+		args                 []string
+		expectedConfig       *cfg.Config
+		expectedErrorMessage string
+	}{
+		{
+			name: "Test_size_scan_flags_explicitly_enabled_but_max-size_is_-1",
+			args: []string{"gcsfuse", "--cache-dir=/tmp", "--file-cache-size-scan-enable", "abc", "pqr"},
+			expectedConfig: &cfg.Config{
+				FileCache: cfg.FileCacheConfig{
+					// Even though size scan is explicitly enabled via flags,
+					// it should be resolved to false because MaxSizeMb is -1 (default).
+					SizeScanEnable: false,
+					MaxSizeMb:      -1,
+				},
+			},
+		},
+		{
+			name: "Test_size_scan_flags_explicitly_enabled_with_default_frequency_and_files",
+			args: []string{"gcsfuse", "--cache-dir=/tmp", "--file-cache-max-size-mb=10", "--file-cache-size-scan-enable", "abc", "pqr"},
+			expectedConfig: &cfg.Config{
+				FileCache: cfg.FileCacheConfig{
+					// Size scan is explicitly enabled and max-size is set > -1,
+					// so it should remain enabled.
+					SizeScanEnable:           true,
+					SizeScanFiles:            false,
+					SizeScanFrequencySeconds: file.DefaultFileCacheSizeScanFrequencySeconds,
+					MaxSizeMb:                10,
+				},
+			},
+		},
+		{
+			name: "Test_size_scan_flags_explicitly_enabled_with_files_true",
+			args: []string{"gcsfuse", "--cache-dir=/tmp", "--file-cache-max-size-mb=10", "--file-cache-size-scan-enable", "--file-cache-size-scan-files", "abc", "pqr"},
+			expectedConfig: &cfg.Config{
+				FileCache: cfg.FileCacheConfig{
+					SizeScanEnable:           true,
+					SizeScanFiles:            true,
+					SizeScanFrequencySeconds: file.DefaultFileCacheSizeScanFrequencySeconds,
+					MaxSizeMb:                10,
+				},
+			},
+		},
+		{
+			name:                 "Test_size_scan_flags_explicitly_enabled_with_frequency_0",
+			args:                 []string{"gcsfuse", "--cache-dir=/tmp", "--file-cache-max-size-mb=10", "--file-cache-size-scan-enable", "--file-cache-size-scan-frequency-seconds=0", "abc", "pqr"},
+			expectedErrorMessage: "invalid config: error parsing file cache config: the value of file-cache-size-scan-frequency-seconds must be greater than 0 when size scan is enabled",
+		},
+		{
+			name: "Test_size_scan_flags_explicitly_enabled_with_frequency_30",
+			args: []string{"gcsfuse", "--cache-dir=/tmp", "--file-cache-max-size-mb=10", "--file-cache-size-scan-enable", "--file-cache-size-scan-frequency-seconds=30", "abc", "pqr"},
+			expectedConfig: &cfg.Config{
+				FileCache: cfg.FileCacheConfig{
+					SizeScanEnable:           true,
+					SizeScanFiles:            false,
+					SizeScanFrequencySeconds: 30,
+					MaxSizeMb:                10,
+				},
+			},
+		},
+		{
+			name: "Test_size_scan_flags_default_max-size_is_greater_than_-1",
+			args: []string{"gcsfuse", "--cache-dir=/tmp", "--file-cache-max-size-mb=100", "abc", "pqr"},
+			expectedConfig: &cfg.Config{
+				FileCache: cfg.FileCacheConfig{
+					// Default is false, and MaxSizeMb > -1 shouldn't automatically enable it.
+					SizeScanEnable: false,
+					MaxSizeMb:      100,
+				},
+			},
+		},
+		{
+			name: "Test_size_scan_flags_default",
+			args: []string{"gcsfuse", "abc", "pqr"},
+			expectedConfig: &cfg.Config{
+				FileCache: cfg.FileCacheConfig{
+					SizeScanEnable:           false,
+					SizeScanFiles:            false,
+					SizeScanFrequencySeconds: file.DefaultFileCacheSizeScanFrequencySeconds,
+					MaxSizeMb:                -1,
+				},
+			},
+		},
+		{
+			name: "Test_size_scan_flags_explicitly_enabled_but_cache_dir_missing",
+			args: []string{"gcsfuse", "--file-cache-max-size-mb=10", "--file-cache-size-scan-enable", "abc", "pqr"},
+			expectedConfig: &cfg.Config{
+				FileCache: cfg.FileCacheConfig{
+					SizeScanEnable:           false,
+					SizeScanFiles:            false,
+					SizeScanFrequencySeconds: file.DefaultFileCacheSizeScanFrequencySeconds,
+					MaxSizeMb:                10,
+				},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotConfig *cfg.Config
+			cmd, err := newRootCmd(func(mountInfo *mountInfo, _, _ string) error {
+				gotConfig = mountInfo.config
+				return nil
+			})
+			require.Nil(t, err)
+			cmd.SetArgs(convertToPosixArgs(tc.args, cmd))
+
+			err = cmd.Execute()
+
+			if tc.expectedErrorMessage != "" {
+				require.ErrorContains(t, err, tc.expectedErrorMessage)
+			} else if assert.NoError(t, err) {
+				assert.Equal(t, tc.expectedConfig.FileCache.MaxSizeMb, gotConfig.FileCache.MaxSizeMb)
+				assert.Equal(t, tc.expectedConfig.FileCache.SizeScanEnable, gotConfig.FileCache.SizeScanEnable)
+				if tc.expectedConfig.FileCache.SizeScanEnable {
+					assert.Equal(t, tc.expectedConfig.FileCache.SizeScanFiles, gotConfig.FileCache.SizeScanFiles)
+					assert.Equal(t, tc.expectedConfig.FileCache.SizeScanFrequencySeconds, gotConfig.FileCache.SizeScanFrequencySeconds)
+				}
+			}
 		})
 	}
 }

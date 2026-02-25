@@ -865,3 +865,64 @@ func TestRationalize_MetadataCacheConfig(t *testing.T) {
 		})
 	}
 }
+
+func TestRationalize_SizeScanEnableValue(t *testing.T) {
+	testCases := []struct {
+		name                   string
+		config                 *Config
+		expectedSizeScanEnable bool
+	}{
+		{
+			name: "max_size_mb_is_-1_size_scan_enable_is_true",
+			config: &Config{
+				CacheDir: ResolvedPath("/tmp/cache"),
+				FileCache: FileCacheConfig{
+					MaxSizeMb:      -1,
+					SizeScanEnable: true,
+				},
+			},
+			expectedSizeScanEnable: false,
+		},
+		{
+			name: "max_size_mb_is_10_size_scan_enable_is_true",
+			config: &Config{
+				CacheDir: ResolvedPath("/tmp/cache"),
+				FileCache: FileCacheConfig{
+					MaxSizeMb:      10,
+					SizeScanEnable: true,
+				},
+			},
+			expectedSizeScanEnable: true,
+		},
+		{
+			name: "max_size_mb_is_-1_size_scan_enable_is_false",
+			config: &Config{
+				CacheDir: ResolvedPath("/tmp/cache"),
+				FileCache: FileCacheConfig{
+					MaxSizeMb:      -1,
+					SizeScanEnable: false,
+				},
+			},
+			expectedSizeScanEnable: false,
+		},
+		{
+			name: "max_size_mb_is_10_cache_dir_empty_size_scan_enable_is_true",
+			config: &Config{
+				CacheDir: ResolvedPath(""),
+				FileCache: FileCacheConfig{
+					MaxSizeMb:      10,
+					SizeScanEnable: true,
+				},
+			},
+			expectedSizeScanEnable: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			resolveSizeScanEnableValue(tc.config)
+
+			assert.Equal(t, tc.expectedSizeScanEnable, tc.config.FileCache.SizeScanEnable)
+		})
+	}
+}
