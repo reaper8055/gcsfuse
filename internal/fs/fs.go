@@ -364,10 +364,6 @@ func createFileCacheHandler(serverCfg *ServerConfig) (fileCacheHandler *file.Cac
 
 		diskSizeCalculator = file.NewFileCacheDiskUtilizationCalculator(scanDir, time.Duration(serverCfg.NewConfig.FileCache.SizeScanFrequencySeconds)*time.Second, serverCfg.NewConfig.FileCache.SizeScanFiles, serverCfg.NewConfig.FileCache.SizeScanDeleteEmptyDirs, cacheDirVolumeBlockSize)
 		fileInfoCache = lru.NewCacheWithCustomSizeCalculator(sizeInBytes, diskSizeCalculator)
-		
-		if err := diskSizeCalculator.SetLRUMutex(fileInfoCache.GetMutex()); err != nil {
-			logger.Warnf("createFileCacheHandler: failed to set LRU mutex on disk size calculator: %v", err)
-		}
 	} else {
 		fileInfoCache = lru.NewCache(sizeInBytes)
 	}
