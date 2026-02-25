@@ -102,7 +102,6 @@ func (c *FileCacheDiskUtilizationCalculator) periodicSizeScan() {
 }
 
 func (c *FileCacheDiskUtilizationCalculator) clearEmptyDirsAndRescanSize() {
-	var contentionCount uint64
 	// Use sharedDirLocker if available, otherwise nil (no locking).
 	// Note: (*SharedDirLocker)(nil) satisfies the interface but we want the interface value to be nil if the pointer is nil.
 	var locker baseutil.DirLocker
@@ -114,7 +113,7 @@ func (c *FileCacheDiskUtilizationCalculator) clearEmptyDirsAndRescanSize() {
 
 	// 1. Remove empty directories if enabled
 	if c.deleteEmptyDirs {
-		contentionCount = baseutil.RemoveEmptyDirsWithLocker(c.cacheDir, locker)
+		baseutil.RemoveEmptyDirsWithLocker(c.cacheDir, locker)
 	}
 
 	// 2. Calculate size on disk (using parallel traversal)
@@ -123,12 +122,7 @@ func (c *FileCacheDiskUtilizationCalculator) clearEmptyDirsAndRescanSize() {
 	// onlyDirs in GetSizeOnDisk means "count ONLY directories".
 	// So if c.includeFiles is true, onlyDirs should be false.
 	// We ignore errors to match best-effort behavior.
-	//
-	// We do not pass the locker here because:
-	// 1. We are only reading/statting, which is safe concurrent with file creation.
-	// 2. The only operation that deletes directories (RemoveEmptyDirs) ran sequentially before this in the same goroutine.
-	// 3. Locking every directory during parallel walk adds significant overhead/jitter.
-	s, err := baseutil.GetSizeOnDiskWithLocker(c.cacheDir, !c.includeFiles, true, nil)
+	s, err := baseutil.GetSizeOnDiskWithLocker(c.cacheDir, !c.includeFiles, true, locker)
 	if err != nil {
 		logger.Warnf("Failed to calculate disk usage for %q: %v", c.cacheDir, err)
 	}
@@ -143,7 +137,7 @@ func (c *FileCacheDiskUtilizationCalculator) clearEmptyDirsAndRescanSize() {
 	if !c.includeFiles {
 		total += filesSize
 	}
-	logger.Debugf("Calculated disk usage for %q: %s bytes. Took %v. (includeFiles=%v). filesSize=%s, total=%s. Contention count: %d", c.cacheDir, baseutil.PrettyPrintOf(s), duration, c.includeFiles, baseutil.PrettyPrintOf(filesSize), baseutil.PrettyPrintOf(total), contentionCount)
+	logger.Debugf("Calculated disk usage for %q: %s bytes. Took %v. (includeFiles=%v). filesSize=%s, total=%s", c.cacheDir, baseutil.PrettyPrintOf(s), duration, c.includeFiles, baseutil.PrettyPrintOf(filesSize), baseutil.PrettyPrintOf(total))
 }
 
 // Stop stops the periodic size scanner.
